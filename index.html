@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>WCK Activations Map</title>
+  <link rel="stylesheet" href="https://js.arcgis.com/4.31/esri/themes/light/main.css">
+  <script src="https://js.arcgis.com/4.31/"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@400;600&display=swap');
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: 'Source Sans 3', sans-serif;
+    }
+
+    #viewDiv {
+      height: 100%;
+      width: 100%;
+    }
+
+    /* ── Popup ── */
+    #custom-popup {
+      position: fixed;
+      background: #ffffff;
+      border: 2px solid #c0185e;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(192,24,94,0.1);
+      width: 290px;
+      z-index: 9999;
+      display: none;
+      overflow: hidden;
+      pointer-events: all;
+      transition: opacity 0.15s ease;
+    }
+
+    #popup-image {
+      width: 100%;
+      height: 200px;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      background-color: #f0f0f0;
+    }
+
+    #popup-content {
+      padding: 14px 16px 16px;
+    }
+
+    #popup-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 18px;
+      font-weight: 700;
+      color: #1a1a1a;
+      margin: 0 0 5px 0;
+      line-height: 1.25;
+    }
+
+    #popup-time {
+      color: #555;
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0 0 14px 0;
+    }
+
+    #popup-link {
+      display: inline-block;
+      padding: 9px 22px;
+      border: 2px solid #c0185e;
+      color: #c0185e;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    #popup-link:hover {
+      background: #c0185e;
+      color: #fff;
+    }
+
+    /* ── Close button ── */
+    #popup-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 24px;
+      height: 24px;
+      background: rgba(255,255,255,0.85);
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 14px;
+      color: #555;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      z-index: 1;
+    }
+
+    #popup-close:hover { background: #fff; color: #c0185e; }
+  </style>
+</head>
+<body>
+
+  <div id="viewDiv"></div>
+
+  <div id="custom-popup">
+    <button id="popup-close" title="Close">✕</button>
+    <div id="popup-image"></div>
+    <div id="popup-content">
+      <p id="popup-title"></p>
+      <p id="popup-time"></p>
+      <a id="popup-link" href="#" target="_blank" rel="noopener">Learn More →</a>
+    </div>
+  </div>
+
+  <script>
+    require([
+      "esri/config",
+      "esri/WebMap",
+      "esri/views/MapView"
+    ], function(esriConfig, WebMap, MapView) {
+
+      // ── Optional: paste your free API key from developers.arcgis.com if the basemap doesn't load ──
+      // esriConfig.apiKey = "YOUR_API_KEY_HERE";
+
+      const webmap = new WebMap({
+        portalItem: {
+          id: "62d36e2c9bc840619dd9cc10f56d5919",
+          portal: { url: "https://wckorg.maps.arcgis.com" }
+        }
+      });
+
+      const view = new MapView({
+        container: "viewDiv",
+        map: webmap,
+        popup: { autoOpenEnabled: false },
+        ui: { components: [] } // removes search box and default widgets
+      });
+
+      // ── Popup elements ──
+      const popup    = document.getElementById("custom-popup");
+      const imgEl    = document.getElementById("popup-image");
+      const titleEl  = document.getElementById("popup-title");
+      const timeEl   = document.getElementById("popup-time");
+      const linkEl   = document.getElementById("popup-link");
+      const closeBtn = document.getElementById("popup-close");
+
+      let hideTimeout  = null;
+      let isOverMap    = false;
+      let isOverPopup  = false;
+      let popupPinned  = false; // stays open after click
+
+      // Close button
+      closeBtn.addEventListener("click", () => {
+        popupPinned = false;
+        popup.style.display = "none";
+      });
+
+      // Keep popup alive while mouse is inside it
+      popup.addEventListener("mouseenter", () => {
+        isOverPopup = true;
+        clearTimeout(hideTimeout);
+      });
+
+      popup.addEventListener("mouseleave", () => {
+        isOverPopup = false;
+        if (!popupPinned) scheduleHide();
+      });
+
+      function scheduleHide() {
+        clearTimeout(hideTimeout);
+        hideTimeout = setTimeout(() => {
+          if (!isOverMap && !isOverPopup && !popupPinned) {
+            popup.style.display = "none";
+          }
+        }, 250);
+      }
+
+      // ── Field name helper (handles spaces vs underscores) ──
+      function getAttr(attrs, ...names) {
+        for (const name of names) {
+          if (attrs[name] !== undefined && attrs[name] !== null && attrs[name] !== "") {
+            return attrs[name];
+          }
+        }
+        return "";
+      }
+
+      // ── Position popup near cursor, keeping it inside viewport ──
+      function positionPopup(x, y) {
+        const W = 290, H = 340;
+        const vw = window.innerWidth, vh = window.innerHeight;
+        let left = x + 18;
+        let top  = y - 120;
+        if (left + W > vw - 10) left = x - W - 18;
+        if (top + H > vh - 10)  top  = vh - H - 10;
+        if (top < 10)            top  = 10;
+        if (left < 10)           left = 10;
+        popup.style.left = left + "px";
+        popup.style.top  = top  + "px";
+      }
+
+      // ── Populate and show popup ──
+      function showPopup(attrs, x, y) {
+        const imageUrl  = getAttr(attrs, "Image URL", "Image_URL", "image_url", "Photo_URL");
+        const timePeriod = getAttr(attrs, "Time_Period", "Time Period", "time_period");
+        const description = getAttr(attrs, "Description", "description", "URL", "url");
+        const locationName = getAttr(attrs, "Location_Name", "Location Name", "location_name", "Name", "name");
+
+        if (imageUrl) {
+          imgEl.style.backgroundImage = `url('${imageUrl}')`;
+          imgEl.style.display = "block";
+        } else {
+          imgEl.style.display = "none";
+        }
+
+        titleEl.textContent = locationName;
+        timeEl.textContent  = timePeriod ? "🗓 " + timePeriod : "";
+
+        if (description) {
+          linkEl.href = description;
+          linkEl.style.display = "inline-block";
+        } else {
+          linkEl.style.display = "none";
+        }
+
+        positionPopup(x, y);
+        popup.style.display = "block";
+      }
+
+      // ── Helper: filter only real operational feature layer results ──
+      function getFeatureResults(hit) {
+        return hit.results.filter(r =>
+          r.graphic &&
+          r.graphic.attributes &&
+          r.layer &&
+          r.layer.type === "feature"
+        );
+      }
+
+      // ── Hover: show popup on pointer-move ──
+      view.on("pointer-move", async (event) => {
+        if (popupPinned) return;
+
+        const hit = await view.hitTest(event);
+        const results = getFeatureResults(hit);
+
+        if (results.length > 0) {
+          isOverMap = true;
+          clearTimeout(hideTimeout);
+          const attrs = results[0].graphic.attributes;
+          showPopup(attrs, event.x, event.y);
+          view.container.style.cursor = "pointer";
+        } else {
+          isOverMap = false;
+          view.container.style.cursor = "default";
+          if (!isOverPopup) scheduleHide();
+        }
+      });
+
+      // ── Click: pin popup so it stays open for link interaction ──
+      view.on("click", async (event) => {
+        const hit = await view.hitTest(event);
+        const results = getFeatureResults(hit);
+
+        if (results.length > 0) {
+          popupPinned = true;
+          const attrs = results[0].graphic.attributes;
+          showPopup(attrs, event.x, event.y);
+        } else {
+          popupPinned = false;
+          popup.style.display = "none";
+        }
+      });
+
+    });
+  </script>
+</body>
+</html>
