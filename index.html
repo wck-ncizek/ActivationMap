@@ -19,12 +19,8 @@
       font-family: 'Source Sans 3', sans-serif;
     }
 
-    #viewDiv {
-      height: 100%;
-      width: 100%;
-    }
+    #viewDiv { height: 100%; width: 100%; }
 
-    /* ── Popup ── */
     #custom-popup {
       position: fixed;
       background: #ffffff;
@@ -36,7 +32,6 @@
       display: none;
       overflow: hidden;
       pointer-events: all;
-      transition: opacity 0.15s ease;
     }
 
     #popup-image {
@@ -48,9 +43,7 @@
       background-color: #f0f0f0;
     }
 
-    #popup-content {
-      padding: 14px 16px 16px;
-    }
+    #popup-content { padding: 14px 16px 16px; }
 
     #popup-title {
       font-family: 'Playfair Display', serif;
@@ -77,23 +70,18 @@
       text-decoration: none;
       font-weight: 700;
       font-size: 13px;
-      letter-spacing: 0.02em;
       transition: background 0.15s, color 0.15s;
     }
 
-    #popup-link:hover {
-      background: #c0185e;
-      color: #fff;
-    }
+    #popup-link:hover { background: #c0185e; color: #fff; }
 
-    /* ── Close button ── */
     #popup-close {
       position: absolute;
       top: 8px;
       right: 8px;
-      width: 24px;
-      height: 24px;
-      background: rgba(255,255,255,0.85);
+      width: 26px;
+      height: 26px;
+      background: rgba(255,255,255,0.9);
       border: none;
       border-radius: 50%;
       cursor: pointer;
@@ -102,15 +90,31 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      line-height: 1;
       z-index: 1;
     }
 
     #popup-close:hover { background: #fff; color: #c0185e; }
+
+    /* Debug panel — shows actual field names so we can confirm they match */
+    #debug {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.78);
+      color: #fff;
+      font-size: 11px;
+      font-family: monospace;
+      padding: 8px 10px;
+      border-radius: 6px;
+      z-index: 9999;
+      max-width: 340px;
+      word-break: break-all;
+      display: none;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
-
   <div id="viewDiv"></div>
 
   <div id="custom-popup">
@@ -123,6 +127,9 @@
     </div>
   </div>
 
+  <!-- Debug panel: hover over a point and this shows the real field names -->
+  <div id="debug"></div>
+
   <script>
     require([
       "esri/config",
@@ -130,7 +137,7 @@
       "esri/views/MapView"
     ], function(esriConfig, WebMap, MapView) {
 
-      // ── Optional: paste your free API key from developers.arcgis.com if the basemap doesn't load ──
+      // Uncomment if basemap doesn't load — get free key at developers.arcgis.com
       // esriConfig.apiKey = "YOUR_API_KEY_HERE";
 
       const webmap = new WebMap({
@@ -144,29 +151,26 @@
         container: "viewDiv",
         map: webmap,
         popup: { autoOpenEnabled: false },
-        ui: { components: [] } // removes search box and default widgets
+        ui: { components: [] }
       });
 
-      // ── Popup elements ──
       const popup    = document.getElementById("custom-popup");
       const imgEl    = document.getElementById("popup-image");
       const titleEl  = document.getElementById("popup-title");
       const timeEl   = document.getElementById("popup-time");
       const linkEl   = document.getElementById("popup-link");
       const closeBtn = document.getElementById("popup-close");
+      const debugEl  = document.getElementById("debug");
 
-      let hideTimeout  = null;
-      let isOverMap    = false;
-      let isOverPopup  = false;
-      let popupPinned  = false; // stays open after click
+      let hideTimeout = null;
+      let isOverPopup = false;
+      let popupPinned = false;
 
-      // Close button
       closeBtn.addEventListener("click", () => {
         popupPinned = false;
         popup.style.display = "none";
       });
 
-      // Keep popup alive while mouse is inside it
       popup.addEventListener("mouseenter", () => {
         isOverPopup = true;
         clearTimeout(hideTimeout);
@@ -180,103 +184,87 @@
       function scheduleHide() {
         clearTimeout(hideTimeout);
         hideTimeout = setTimeout(() => {
-          if (!isOverMap && !isOverPopup && !popupPinned) {
-            popup.style.display = "none";
-          }
-        }, 250);
+          if (!isOverPopup && !popupPinned) popup.style.display = "none";
+        }, 300);
       }
 
-      // ── Field name helper (handles spaces vs underscores) ──
       function getAttr(attrs, ...names) {
-        for (const name of names) {
-          if (attrs[name] !== undefined && attrs[name] !== null && attrs[name] !== "") {
-            return attrs[name];
-          }
+        for (const n of names) {
+          if (attrs[n] !== undefined && attrs[n] !== null && attrs[n] !== "") return attrs[n];
         }
         return "";
       }
 
-      // ── Position popup near cursor, keeping it inside viewport ──
       function positionPopup(x, y) {
-        const W = 290, H = 340;
+        const W = 290, H = 360;
         const vw = window.innerWidth, vh = window.innerHeight;
-        let left = x + 18;
-        let top  = y - 120;
+        let left = x + 18, top = y - 140;
         if (left + W > vw - 10) left = x - W - 18;
         if (top + H > vh - 10)  top  = vh - H - 10;
-        if (top < 10)            top  = 10;
-        if (left < 10)           left = 10;
+        if (top < 10)           top  = 10;
+        if (left < 10)          left = 10;
         popup.style.left = left + "px";
         popup.style.top  = top  + "px";
       }
 
-      // ── Populate and show popup ──
       function showPopup(attrs, x, y) {
-        const imageUrl  = getAttr(attrs, "Image URL", "Image_URL", "image_url", "Photo_URL");
-        const timePeriod = getAttr(attrs, "Time_Period", "Time Period", "time_period");
-        const description = getAttr(attrs, "Description", "description", "URL", "url");
-        const locationName = getAttr(attrs, "Location_Name", "Location Name", "location_name", "Name", "name");
+        // Show actual field names in debug panel — screenshot and send to me if popup is blank
+        debugEl.style.display = "block";
+        debugEl.textContent = "Fields detected: " + Object.keys(attrs).join(", ");
 
-        if (imageUrl) {
-          imgEl.style.backgroundImage = `url('${imageUrl}')`;
-          imgEl.style.display = "block";
-        } else {
-          imgEl.style.display = "none";
-        }
+        const imageUrl    = getAttr(attrs, "Image URL", "Image_URL", "image_url", "Photo_URL");
+        const timePeriod  = getAttr(attrs, "Time_Period", "Time Period", "time_period");
+        const description = getAttr(attrs, "Description", "description", "URL", "url", "Link");
+        const locName     = getAttr(attrs, "Location_Name", "Location Name", "location_name", "Name", "name");
 
-        titleEl.textContent = locationName;
-        timeEl.textContent  = timePeriod ? "🗓 " + timePeriod : "";
+        // If none of the fields matched, skip showing the popup
+        if (!locName && !timePeriod && !description && !imageUrl) return;
 
-        if (description) {
-          linkEl.href = description;
-          linkEl.style.display = "inline-block";
-        } else {
-          linkEl.style.display = "none";
-        }
+        imgEl.style.display = imageUrl ? "block" : "none";
+        if (imageUrl) imgEl.style.backgroundImage = `url('${imageUrl}')`;
+
+        titleEl.textContent  = locName;
+        timeEl.textContent   = timePeriod ? "🗓 " + timePeriod : "";
+        linkEl.href          = description || "#";
+        linkEl.style.display = description ? "inline-block" : "none";
 
         positionPopup(x, y);
         popup.style.display = "block";
       }
 
-      // ── Helper: filter only real operational feature layer results ──
-      function getFeatureResults(hit) {
-        return hit.results.filter(r =>
-          r.graphic &&
-          r.graphic.attributes &&
-          r.layer &&
-          r.layer.type === "feature"
-        );
+      // Only match point features — skip polygons, lines, and basemap
+      function filterResults(hit) {
+        return hit.results.filter(r => {
+          if (!r.graphic || !r.layer) return false;
+          if (r.layer.type !== "feature") return false;
+          const geom = r.graphic.geometry;
+          if (geom && geom.type !== "point") return false;
+          return true;
+        });
       }
 
-      // ── Hover: show popup on pointer-move ──
       view.on("pointer-move", async (event) => {
         if (popupPinned) return;
-
-        const hit = await view.hitTest(event);
-        const results = getFeatureResults(hit);
+        const hit = await view.hitTest(event, { includeBasemap: false });
+        const results = filterResults(hit);
 
         if (results.length > 0) {
-          isOverMap = true;
           clearTimeout(hideTimeout);
-          const attrs = results[0].graphic.attributes;
-          showPopup(attrs, event.x, event.y);
+          showPopup(results[0].graphic.attributes, event.x, event.y);
           view.container.style.cursor = "pointer";
         } else {
-          isOverMap = false;
           view.container.style.cursor = "default";
           if (!isOverPopup) scheduleHide();
         }
       });
 
-      // ── Click: pin popup so it stays open for link interaction ──
       view.on("click", async (event) => {
-        const hit = await view.hitTest(event);
-        const results = getFeatureResults(hit);
+        const hit = await view.hitTest(event, { includeBasemap: false });
+        const results = filterResults(hit);
 
         if (results.length > 0) {
           popupPinned = true;
-          const attrs = results[0].graphic.attributes;
-          showPopup(attrs, event.x, event.y);
+          showPopup(results[0].graphic.attributes, event.x, event.y);
         } else {
           popupPinned = false;
           popup.style.display = "none";
