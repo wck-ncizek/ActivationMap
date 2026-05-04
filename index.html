@@ -12,34 +12,33 @@
     * { box-sizing: border-box; }
 
     html, body {
-      height: 100%;
-      width: 100%;
-      margin: 0;
-      padding: 0;
+      height: 100%; width: 100%; margin: 0; padding: 0;
       font-family: 'Source Sans 3', sans-serif;
+      overflow: hidden;
     }
 
-    #viewDiv { height: 100%; width: 100%; }
+    #viewDiv {
+      height: 100%; width: 100%;
+      position: absolute; top: 0; left: 0;
+    }
 
     #custom-popup {
-      position: fixed;
+      position: absolute;
       background: #ffffff;
       border: 2px solid #c0185e;
       border-radius: 12px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(192,24,94,0.1);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.18);
       width: 290px;
       z-index: 9999;
       display: none;
       overflow: hidden;
-      pointer-events: all;
+      pointer-events: auto;
     }
 
     #popup-image {
-      width: 100%;
-      height: 200px;
+      width: 100%; height: 200px;
       background-size: cover;
       background-position: center;
-      background-repeat: no-repeat;
       background-color: #f0f0f0;
     }
 
@@ -47,17 +46,14 @@
 
     #popup-title {
       font-family: 'Playfair Display', serif;
-      font-size: 18px;
-      font-weight: 700;
+      font-size: 18px; font-weight: 700;
       color: #1a1a1a;
       margin: 0 0 5px 0;
-      line-height: 1.25;
     }
 
     #popup-time {
       color: #555;
-      font-size: 14px;
-      font-weight: 600;
+      font-size: 14px; font-weight: 600;
       margin: 0 0 14px 0;
     }
 
@@ -68,49 +64,18 @@
       color: #c0185e;
       border-radius: 6px;
       text-decoration: none;
-      font-weight: 700;
-      font-size: 13px;
-      transition: background 0.15s, color 0.15s;
+      font-weight: 700; font-size: 13px;
     }
 
     #popup-link:hover { background: #c0185e; color: #fff; }
 
     #popup-close {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 26px;
-      height: 26px;
+      position: absolute; top: 8px; right: 8px;
+      width: 26px; height: 26px;
       background: rgba(255,255,255,0.9);
-      border: none;
-      border-radius: 50%;
-      cursor: pointer;
-      font-size: 14px;
-      color: #555;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      border: none; border-radius: 50%;
+      cursor: pointer; font-size: 14px;
       z-index: 1;
-    }
-
-    #popup-close:hover { background: #fff; color: #c0185e; }
-
-    /* Debug panel — shows actual field names so we can confirm they match */
-    #debug {
-      position: fixed;
-      bottom: 10px;
-      left: 10px;
-      background: rgba(0,0,0,0.78);
-      color: #fff;
-      font-size: 11px;
-      font-family: monospace;
-      padding: 8px 10px;
-      border-radius: 6px;
-      z-index: 9999;
-      max-width: 340px;
-      word-break: break-all;
-      display: none;
-      pointer-events: none;
     }
   </style>
 </head>
@@ -118,7 +83,7 @@
   <div id="viewDiv"></div>
 
   <div id="custom-popup">
-    <button id="popup-close" title="Close">✕</button>
+    <button id="popup-close">✕</button>
     <div id="popup-image"></div>
     <div id="popup-content">
       <p id="popup-title"></p>
@@ -127,18 +92,12 @@
     </div>
   </div>
 
-  <!-- Debug panel: hover over a point and this shows the real field names -->
-  <div id="debug"></div>
-
   <script>
     require([
       "esri/config",
       "esri/WebMap",
       "esri/views/MapView"
     ], function(esriConfig, WebMap, MapView) {
-
-      // Uncomment if basemap doesn't load — get free key at developers.arcgis.com
-      // esriConfig.apiKey = "YOUR_API_KEY_HERE";
 
       const webmap = new WebMap({
         portalItem: {
@@ -160,111 +119,124 @@
       const timeEl   = document.getElementById("popup-time");
       const linkEl   = document.getElementById("popup-link");
       const closeBtn = document.getElementById("popup-close");
-      const debugEl  = document.getElementById("debug");
 
-      let hideTimeout = null;
       let isOverPopup = false;
       let popupPinned = false;
+      let lastOid = null;
+      let attrCache = {}; // cache queried features so we don't re-query
 
       closeBtn.addEventListener("click", () => {
         popupPinned = false;
         popup.style.display = "none";
+        lastOid = null;
       });
 
-      popup.addEventListener("mouseenter", () => {
-        isOverPopup = true;
-        clearTimeout(hideTimeout);
-      });
-
+      popup.addEventListener("mouseenter", () => isOverPopup = true);
       popup.addEventListener("mouseleave", () => {
         isOverPopup = false;
-        if (!popupPinned) scheduleHide();
+        if (!popupPinned) popup.style.display = "none";
       });
 
-      function scheduleHide() {
-        clearTimeout(hideTimeout);
-        hideTimeout = setTimeout(() => {
-          if (!isOverPopup && !popupPinned) popup.style.display = "none";
-        }, 300);
-      }
+      // ── Query the full feature attributes using its ObjectId ──
+      async function getFullAttributes(layer, oid) {
+        const cacheKey = layer.id + ":" + oid;
+        if (attrCache[cacheKey]) return attrCache[cacheKey];
 
-      function getAttr(attrs, ...names) {
-        for (const n of names) {
-          if (attrs[n] !== undefined && attrs[n] !== null && attrs[n] !== "") return attrs[n];
+        const result = await layer.queryFeatures({
+          objectIds: [oid],
+          outFields: ["*"],
+          returnGeometry: false
+        });
+        if (result.features.length > 0) {
+          attrCache[cacheKey] = result.features[0].attributes;
+          return attrCache[cacheKey];
         }
-        return "";
+        return null;
       }
 
-      function positionPopup(x, y) {
+      // ── Show popup with full attributes ──
+      function showPopup(attrs, x, y) {
+        const imageUrl = attrs["Image URL"] || attrs["Image_URL"] || attrs["image_url"] || "";
+        const timePeriod = attrs["Time_Period"] || attrs["Time Period"] || "";
+        const description = attrs["Description"] || attrs["URL"] || "";
+        const locName = attrs["Location_Name"] || attrs["Location Name"] || attrs["Name"] || "Activation";
+
+        if (imageUrl) {
+          imgEl.style.backgroundImage = `url('${imageUrl}')`;
+          imgEl.style.display = "block";
+        } else {
+          imgEl.style.display = "none";
+        }
+
+        titleEl.textContent = locName;
+        timeEl.textContent = timePeriod ? "🗓 " + timePeriod : "";
+        linkEl.href = description || "#";
+        linkEl.style.display = description ? "inline-block" : "none";
+
+        // Position near cursor, keeping inside viewport
         const W = 290, H = 360;
         const vw = window.innerWidth, vh = window.innerHeight;
-        let left = x + 18, top = y - 140;
+        let left = x + 18, top = y - 100;
         if (left + W > vw - 10) left = x - W - 18;
         if (top + H > vh - 10)  top  = vh - H - 10;
         if (top < 10)           top  = 10;
         if (left < 10)          left = 10;
         popup.style.left = left + "px";
         popup.style.top  = top  + "px";
-      }
-
-      function showPopup(attrs, x, y) {
-        // Show actual field names in debug panel — screenshot and send to me if popup is blank
-        debugEl.style.display = "block";
-        debugEl.textContent = "Fields detected: " + Object.keys(attrs).join(", ");
-
-        const imageUrl    = getAttr(attrs, "Image URL", "Image_URL", "image_url", "Photo_URL");
-        const timePeriod  = getAttr(attrs, "Time_Period", "Time Period", "time_period");
-        const description = getAttr(attrs, "Description", "description", "URL", "url", "Link");
-        const locName     = getAttr(attrs, "Location_Name", "Location Name", "location_name", "Name", "name");
-
-        // If none of the fields matched, skip showing the popup
-        if (!locName && !timePeriod && !description && !imageUrl) return;
-
-        imgEl.style.display = imageUrl ? "block" : "none";
-        if (imageUrl) imgEl.style.backgroundImage = `url('${imageUrl}')`;
-
-        titleEl.textContent  = locName;
-        timeEl.textContent   = timePeriod ? "🗓 " + timePeriod : "";
-        linkEl.href          = description || "#";
-        linkEl.style.display = description ? "inline-block" : "none";
-
-        positionPopup(x, y);
         popup.style.display = "block";
       }
 
-      // Only match point features — skip polygons, lines, and basemap
-      function filterResults(hit) {
-        return hit.results.filter(r => {
-          if (!r.graphic || !r.layer) return false;
-          if (r.layer.type !== "feature") return false;
-          const geom = r.graphic.geometry;
-          if (geom && geom.type !== "point") return false;
-          return true;
-        });
-      }
-
+      // ── Hover handler ──
       view.on("pointer-move", async (event) => {
         if (popupPinned) return;
-        const hit = await view.hitTest(event, { includeBasemap: false });
-        const results = filterResults(hit);
 
-        if (results.length > 0) {
-          clearTimeout(hideTimeout);
-          showPopup(results[0].graphic.attributes, event.x, event.y);
-          view.container.style.cursor = "pointer";
-        } else {
-          view.container.style.cursor = "default";
-          if (!isOverPopup) scheduleHide();
+        try {
+          const hit = await view.hitTest(event);
+          const featResult = hit.results.find(r =>
+            r.graphic && r.layer && r.layer.type === "feature"
+          );
+
+          if (featResult) {
+            const layer = featResult.layer;
+            const oidField = layer.objectIdField || "OBJECTID";
+            const oid = featResult.graphic.attributes[oidField] ||
+                        featResult.graphic.attributes["ObjectId"] ||
+                        featResult.graphic.attributes["objectid"];
+
+            if (oid === lastOid && popup.style.display === "block") return;
+            lastOid = oid;
+
+            const fullAttrs = await getFullAttributes(layer, oid);
+            if (fullAttrs) {
+              showPopup(fullAttrs, event.x, event.y);
+              view.container.style.cursor = "pointer";
+            }
+          } else {
+            view.container.style.cursor = "default";
+            if (!isOverPopup) {
+              popup.style.display = "none";
+              lastOid = null;
+            }
+          }
+        } catch (e) {
+          console.error("Hover error:", e);
         }
       });
 
+      // ── Click pins popup ──
       view.on("click", async (event) => {
-        const hit = await view.hitTest(event, { includeBasemap: false });
-        const results = filterResults(hit);
-
-        if (results.length > 0) {
+        const hit = await view.hitTest(event);
+        const featResult = hit.results.find(r =>
+          r.graphic && r.layer && r.layer.type === "feature"
+        );
+        if (featResult) {
           popupPinned = true;
-          showPopup(results[0].graphic.attributes, event.x, event.y);
+          const layer = featResult.layer;
+          const oidField = layer.objectIdField || "OBJECTID";
+          const oid = featResult.graphic.attributes[oidField] ||
+                      featResult.graphic.attributes["ObjectId"];
+          const fullAttrs = await getFullAttributes(layer, oid);
+          if (fullAttrs) showPopup(fullAttrs, event.x, event.y);
         } else {
           popupPinned = false;
           popup.style.display = "none";
