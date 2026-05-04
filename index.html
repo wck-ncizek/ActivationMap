@@ -186,15 +186,36 @@
         popup.style.display = "block";
       }
 
+      // ── Layers/geometries to ignore ──
+      // Skips any layer whose name contains one of these strings
+      const IGNORED_LAYER_KEYWORDS = ["Land Area", "World Countries", "Countries"];
+
+      function isValidFeatureResult(r) {
+        if (!r.graphic || !r.layer || r.layer.type !== "feature") return false;
+
+        // Log every hit so we can see what's actually being detected
+        console.log("Layer hit:", JSON.stringify(r.layer.title), "geom:", r.graphic.geometry && r.graphic.geometry.type);
+
+        // Skip by layer title keyword match
+        const title = r.layer.title || "";
+        for (const kw of IGNORED_LAYER_KEYWORDS) {
+          if (title.toLowerCase().includes(kw.toLowerCase())) return false;
+        }
+
+        // Also skip non-point geometries (countries are polygons)
+        const geom = r.graphic.geometry;
+        if (geom && geom.type !== "point") return false;
+
+        return true;
+      }
+
       // ── Hover handler ──
       view.on("pointer-move", async (event) => {
         if (popupPinned) return;
 
         try {
           const hit = await view.hitTest(event);
-          const featResult = hit.results.find(r =>
-            r.graphic && r.layer && r.layer.type === "feature"
-          );
+          const featResult = hit.results.find(isValidFeatureResult);
 
           if (featResult) {
             const layer = featResult.layer;
@@ -226,9 +247,7 @@
       // ── Click pins popup ──
       view.on("click", async (event) => {
         const hit = await view.hitTest(event);
-        const featResult = hit.results.find(r =>
-          r.graphic && r.layer && r.layer.type === "feature"
-        );
+        const featResult = hit.results.find(isValidFeatureResult);
         if (featResult) {
           popupPinned = true;
           const layer = featResult.layer;
