@@ -110,7 +110,14 @@
         container: "viewDiv",
         map: webmap,
         popup: { autoOpenEnabled: false },
-        ui: { components: [] }
+        ui: { components: [] },
+        // Wider starting extent — covers most of the world at a higher zoom
+        center: [0, 20],
+        zoom: 2,
+        constraints: {
+          minZoom: 2,
+          rotationEnabled: false
+        }
       });
 
       const popup    = document.getElementById("custom-popup");
@@ -135,6 +142,34 @@
       popup.addEventListener("mouseleave", () => {
         isOverPopup = false;
         if (!popupPinned) popup.style.display = "none";
+      });
+
+      // ── Reset state when user returns to the tab ──
+      // Without this, hover stays "stuck" if user switched apps and came back
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+          // Page became visible again — reset hover state so it works freshly
+          isOverPopup = false;
+          if (!popupPinned) {
+            popup.style.display = "none";
+            lastOid = null;
+          }
+        }
+      });
+
+      window.addEventListener("focus", () => {
+        isOverPopup = false;
+        if (!popupPinned) {
+          popup.style.display = "none";
+          lastOid = null;
+        }
+      });
+
+      // Also reset state when mouse re-enters the map area
+      view.container.addEventListener("mouseenter", () => {
+        if (!popupPinned) {
+          lastOid = null;
+        }
       });
 
       // ── Query the full feature attributes using its ObjectId ──
